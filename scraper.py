@@ -25,15 +25,21 @@ class ImovelWebScraper:
             "Accept-Language": "pt-BR,pt;q=0.9",
         }
 
-    def _build_url(self, estado: str, page: int) -> str:
-        slug = ESTADOS_URL.get(estado.upper(), estado.lower())
-        if page == 1:
-            return f"https://www.imovelweb.com.br/imoveis-venda-{slug}.html"
-        return f"https://www.imovelweb.com.br/imoveis-venda-{slug}-pagina-{page}.html"
+    def _build_url(self, estado: str, page: int, cidade_slug: str = "") -> str:
+        estado_slug = ESTADOS_URL.get(estado.upper(), estado.lower())
+        if cidade_slug:
+            # URL por cidade: /imoveis-venda-campinas-sp.html
+            base = f"https://www.imovelweb.com.br/imoveis-venda-{cidade_slug}-{estado.lower()}.html"
+        else:
+            base = f"https://www.imovelweb.com.br/imoveis-venda-{estado_slug}.html"
 
-    def get_listing_links(self, estado: str, page: int) -> list[str]:
+        if page == 1:
+            return base
+        return base.replace(".html", f"-pagina-{page}.html")
+
+    def get_listing_links(self, estado: str, page: int, cidade_slug: str = "") -> list[str]:
         """Extrai links de anúncios de uma página de listagem."""
-        url = self._build_url(estado, page)
+        url = self._build_url(estado, page, cidade_slug)
         self._wait()
         try:
             r = self.scraper.get(url, headers=self._headers(), timeout=20)
