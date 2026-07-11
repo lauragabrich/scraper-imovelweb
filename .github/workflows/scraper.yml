@@ -1,0 +1,51 @@
+name: Scraper ImovelWeb
+
+on:
+  schedule:
+    - cron: '15 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      estado:
+        description: 'Estado (ex: SP, RJ ou ALL)'
+        required: false
+        default: 'ALL'
+      limit:
+        description: 'Limite por estado (vazio = sem limite)'
+        required: false
+        default: ''
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    concurrency:
+      group: scraper-imovelweb
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+
+      - name: Rodar scraper
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          ESTADO="${{ github.event.inputs.estado || 'ALL' }}"
+          LIMIT="${{ github.event.inputs.limit }}"
+
+          if [ "$ESTADO" = "ALL" ]; then
+            CMD="python main.py --all-estados"
+          else
+            CMD="python main.py --estado $ESTADO"
+          fi
+
+          if [ -n "$LIMIT" ]; then
+            CMD="$CMD --limit $LIMIT"
+          fi
+
+          echo "Executando: $CMD"
+          $CMD
