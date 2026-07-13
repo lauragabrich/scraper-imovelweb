@@ -77,40 +77,25 @@ class ImovelWebScraper:
         except Exception:
             return None
 
-    # ─── Fase 1: Sitemap → URLs de listagem ──────────────────────
+    # ─── Fase 1: Carregar URLs de listagem ───────────────────────
 
     def get_listing_urls(self, filter_venda: bool = True) -> list[str]:
-        """Baixa sub-sitemaps e extrai URLs de listagem."""
-        print("[ImovelWeb] Baixando sitemaps...", flush=True)
+        """Carrega URLs de listagem do arquivo local (pré-baixado do sitemap)."""
+        import json as json_mod
+        import os
 
-        # URLs conhecidas dos sub-sitemaps (descobertas via robots.txt)
-        sub_sitemaps = [
-            f"https://www.imovelweb.com.br/sitemap_list_https_{i}.xml.gz"
-            for i in range(1, 43)
-        ]
+        cache_file = os.path.join(os.path.dirname(__file__), "listing_urls.json")
 
-        all_urls = []
-        for i, sub_url in enumerate(sub_sitemaps):
-            # Usa requests direto para .xml.gz (não precisa de Selenium)
-            try:
-                self._wait(0.3, 0.8)
-                r = self.scraper.get(sub_url, timeout=30)
-                if r.status_code != 200:
-                    continue
-                content = gzip.decompress(r.content).decode("utf-8")
-                locs = re.findall(r'<loc>\s*(.*?)\s*</loc>', content)
+        if not os.path.exists(cache_file):
+            print("[ImovelWeb] ERRO: listing_urls.json não encontrado!", flush=True)
+            print("[ImovelWeb] Rode localmente para gerar o arquivo.", flush=True)
+            return []
 
-                if filter_venda:
-                    locs = [l for l in locs if "-venda" in l]
+        with open(cache_file, "r") as f:
+            urls = json_mod.load(f)
 
-                all_urls.extend(locs)
-                if locs:
-                    print(f"  [{i+1}] {sub_url.split('/')[-1]}: {len(locs)} URLs", flush=True)
-            except Exception:
-                continue
-
-        print(f"[ImovelWeb] Total: {len(all_urls)} URLs de listagem (venda)", flush=True)
-        return all_urls
+        print(f"[ImovelWeb] {len(urls)} URLs de listagem carregadas", flush=True)
+        return urls
 
     # ─── Fase 2: Listagem → links de propriedades ────────────────
 
