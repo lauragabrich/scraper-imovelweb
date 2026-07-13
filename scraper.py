@@ -80,31 +80,34 @@ class ImovelWebScraper:
     # ─── Fase 1: Sitemap → URLs de listagem ──────────────────────
 
     def get_listing_urls(self, filter_venda: bool = True) -> list[str]:
-        """Baixa todos os sub-sitemaps e extrai URLs de listagem."""
-        print("[ImovelWeb] Baixando sitemap index...", flush=True)
-        xml = self._fetch(self.SITEMAP_INDEX)
-        if not xml:
-            print("[ImovelWeb] Falha ao baixar sitemap index", flush=True)
-            return []
+        """Baixa sub-sitemaps e extrai URLs de listagem."""
+        print("[ImovelWeb] Baixando sitemaps...", flush=True)
 
-        sub_urls = re.findall(r'<loc>\s*(.*?)\s*</loc>', xml)
-        # Filtra só os sitemap_list (listagens de imóveis)
-        list_sitemaps = [u for u in sub_urls if "sitemap_list_https" in u]
-        print(f"[ImovelWeb] {len(list_sitemaps)} sub-sitemaps de listagem", flush=True)
+        # URLs conhecidas dos sub-sitemaps (descobertas via robots.txt)
+        sub_sitemaps = [
+            f"https://www.imovelweb.com.br/sitemap_list_https_{i}.xml.gz"
+            for i in range(1, 43)
+        ]
 
         all_urls = []
-        for i, sub_url in enumerate(list_sitemaps):
-            content = self._fetch(sub_url)
-            if not content:
+        for i, sub_url in enumerate(sub_sitemaps):
+            # Usa requests direto para .xml.gz (não precisa de Selenium)
+            try:
+                self._wait(0.3, 0.8)
+                r = self.scraper.get(sub_url, timeout=30)
+                if r.status_code != 200:
+                    continue
+                content = gzip.decompress(r.content).decode("utf-8")
+                locs = re.findall(r'<loc>\s*(.*?)\s*</loc>', content)
+
+                if filter_venda:
+                    locs = [l for l in locs if "-venda" in l]
+
+                all_urls.extend(locs)
+                if locs:
+                    print(f"  [{i+1}] {sub_url.split('/')[-1]}: {len(locs)} URLs", flush=True)
+            except Exception:
                 continue
-            locs = re.findall(r'<loc>\s*(.*?)\s*</loc>', content)
-
-            if filter_venda:
-                # Filtra só URLs de venda
-                locs = [l for l in locs if "-venda" in l]
-
-            all_urls.extend(locs)
-            print(f"  [{i+1}/{len(list_sitemaps)}] {sub_url.split('/')[-1]}: {len(locs)} URLs", flush=True)
 
         print(f"[ImovelWeb] Total: {len(all_urls)} URLs de listagem (venda)", flush=True)
         return all_urls
@@ -112,10 +115,15 @@ class ImovelWebScraper:
     # ─── Fase 2: Listagem → links de propriedades ────────────────
 
     def get_property_links(self, listing_url: str) -> list[str]:
-        """Acessa uma página de listagem e extrai links de /propriedades/."""
+        """Acessa uma página de listagem com Selenium e extrai links."""
+        from browser import fetch_page
         self._wait()
-        html = self._fetch(listing_url)
-        if not html:
+        driver = self._get_driver()
+        try:
+            html = fetch_page(driver, listing_url)
+            if not html:
+                return []
+        except Exception:
             return []
 
         links = re.findall(r'href="(/propriedades/[^"?]+)', html)
@@ -125,10 +133,15 @@ class ImovelWebScraper:
     # ─── Fase 3: Scraping individual ─────────────────────────────
 
     def scrape_listing(self, url: str) -> dict | None:
-        """Scrape de um anúncio individual."""
+        """Scrape de um anúncio individual com Selenium."""
+        from browser import fetch_page
         self._wait()
-        html = self._fetch(url)
-        if not html:
+        driver = self._get_driver()
+        try:
+            html = fetch_page(driver, url)
+            if not html:
+                return None
+        except Exception:
             return None
         return self._parse_html(html, url)
 
