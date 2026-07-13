@@ -46,9 +46,13 @@ class Database:
                 latitude REAL, longitude REAL,
                 titulo TEXT, descricao TEXT, fotos_urls TEXT, image_count INTEGER,
                 preco_condominio REAL, iptu REAL, preco_por_m2 REAL,
-                finalidade TEXT, amenities TEXT,
+                finalidade TEXT, amenities TEXT, complex_amenities TEXT,
                 data_publicacao TEXT, data_ultima_atualizacao TEXT, data_coleta TEXT,
-                anunciante_nome TEXT, raw_html TEXT,
+                anunciante_nome TEXT, anunciante_telefone TEXT,
+                listing_id TEXT, stamps TEXT, contract_type TEXT, zona TEXT,
+                usage_types TEXT, property_sub_type TEXT,
+                andar INTEGER, total_andares INTEGER, aceita_permuta TEXT,
+                status_anuncio TEXT, raw_json TEXT, raw_html TEXT,
                 imovel_disponivel TEXT, imovel_atualizado TEXT
             )
         """)
