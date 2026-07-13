@@ -1,14 +1,27 @@
 # Scraper ImovelWeb - Imóveis Brasil
 
-Coleta anúncios do ImovelWeb via scraping HTML com cloudscraper (bypass Cloudflare).
+Coleta anúncios do ImovelWeb usando sitemap do site (200k+ URLs de listagem) para cobertura completa.
 
-## Como funciona
+## Abordagem técnica
 
-1. Acessa páginas de listagem por estado (paginação)
-2. Extrai links de anúncios individuais (~30 por página)
-3. Para cada anúncio, faz scraping do HTML completo
-4. Extrai dados via BeautifulSoup (preço, área, quartos, etc.)
-5. Salva no Turso com progresso por estado
+### Fase 1: Sitemap → URLs de listagem (cloudscraper)
+```
+sitemaps_https.xml → 42 sub-sitemaps (gzip)
+→ 200k+ URLs tipo /apartamentos-venda-sao-paulo-sp.html
+→ Filtra apenas URLs de venda
+```
+
+### Fase 2: Listagem → links de propriedades (cloudscraper)
+```
+Cada URL de listagem tem ~30 links de /propriedades/...
+→ Extrai todos os links
+```
+
+### Fase 3: Scraping individual (cloudscraper + BeautifulSoup)
+```
+Acessa cada /propriedades/... e extrai:
+preço, área, quartos, bairro, fotos, coordenadas, etc.
+```
 
 ## Dados coletados
 
@@ -16,20 +29,28 @@ Coleta anúncios do ImovelWeb via scraping HTML com cloudscraper (bypass Cloudfl
 - Área construída/terreno, quartos, suítes, banheiros, vagas
 - Localização (endereço, coordenadas)
 - Título, descrição, fotos, amenities
-- Datas (publicação/atualização quando disponíveis)
-- HTML parcial como backup (raw_html)
+- Datas (quando disponíveis via meta tags)
+- HTML parcial como backup
 
 ## Uso
 
 ```bash
 pip install -r requirements.txt
-python main.py --estado SP --limit 10
-python main.py --all-estados
+python main.py --limit 10
+python main.py
+python main.py --reset
 ```
+
+## Cobertura
+
+- ✅ 200k+ URLs de listagem do sitemap oficial
+- ✅ Todas as cidades/bairros que o ImovelWeb indexa
+- ✅ Apenas venda (filtrado)
+- ✅ Progresso salvo no banco (continua entre execuções)
 
 ## Limitações
 
-- Cloudflare pode bloquear após muitas requests
-- Scraping HTML é mais lento (~3-5s por anúncio)
-- Estrutura do HTML pode mudar sem aviso
+- Cloudflare pode bloquear (usa cloudscraper para bypass)
+- Scraping HTML é lento (~3-5s por anúncio)
+- Estrutura HTML pode mudar
 - Datas nem sempre disponíveis

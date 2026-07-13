@@ -1,22 +1,35 @@
+"""
+Scraper ImovelWeb — Sitemap (listagens) + cloudscraper (anúncios individuais).
+
+Estratégia:
+- Fase 1: sitemaps_https.xml → 42 sub-sitemaps → 200k+ URLs de listagem
+  (ex: /apartamentos-venda-sao-paulo-sp.html)
+- Fase 2: para cada URL de listagem, extrai links de /propriedades/
+- Fase 3: scraping individual de cada propriedade
+"""
+
+import gzip
 import re
-import json
 import time
 import random
+import json
 import cloudscraper
 from bs4 import BeautifulSoup
-from config import USER_AGENTS, ESTADOS_URL
 from database import Database
+from config import USER_AGENTS
 
 
 class ImovelWebScraper:
-    """Scraper ImovelWeb via páginas de listagem + scraping individual."""
+    """Scraper ImovelWeb via sitemap + scraping HTML."""
+
+    SITEMAP_INDEX = "https://www.imovelweb.com.br/sitemaps_https.xml"
 
     def __init__(self):
         self.db = Database()
         self.scraper = cloudscraper.create_scraper()
 
-    def _wait(self):
-        time.sleep(random.uniform(2.0, 4.0))
+    def _wait(self, min_s=2.0, max_s=4.0):
+        time.sleep(random.uniform(min_s, max_s))
 
     def _headers(self):
         return {
@@ -25,89 +38,107 @@ class ImovelWebScraper:
             "Accept-Language": "pt-BR,pt;q=0.9",
         }
 
-    def _build_url(self, estado: str, page: int, cidade_slug: str = "") -> str:
-        estado_slug = ESTADOS_URL.get(estado.upper(), estado.lower())
-        if cidade_slug:
-            # URL por cidade: /imoveis-venda-campinas-sp.html
-            base = f"https://www.imovelweb.com.br/imoveis-venda-{cidade_slug}-{estado.lower()}.html"
-        else:
-            base = f"https://www.imovelweb.com.br/imoveis-venda-{estado_slug}.html"
+    def _fetch(self, url: str, retries: int = 2) -> str | None:
+        """GET com retry."""
+        for attempt in range(1, retries + 1):
+            try:
+                self._wait(0.5, 1.5)
+                r = self.scraper.get(url, headers=self._headers(), timeout=30)
+                if r.status_code == 403:
+                    time.sleep(5)
+                    continue
+                r.raise_for_status()
+                if url.endswith(".gz"):
+                    return gzip.decompress(r.content).decode("utf-8")
+                return r.text
+            except Exception:
+                if attempt < retries:
+                    time.sleep(2 ** attempt)
+        return None
 
-        if page == 1:
-            return base
-        return base.replace(".html", f"-pagina-{page}.html")
+    # ─── Fase 1: Sitemap → URLs de listagem ──────────────────────
 
-    def get_listing_links(self, estado: str, page: int, cidade_slug: str = "") -> list[str]:
-        """Extrai links de anúncios de uma página de listagem."""
-        url = self._build_url(estado, page, cidade_slug)
-        self._wait()
-        try:
-            r = self.scraper.get(url, headers=self._headers(), timeout=20)
-            if r.status_code != 200:
-                return []
-        except Exception:
+    def get_listing_urls(self, filter_venda: bool = True) -> list[str]:
+        """Baixa todos os sub-sitemaps e extrai URLs de listagem."""
+        print("[ImovelWeb] Baixando sitemap index...", flush=True)
+        xml = self._fetch(self.SITEMAP_INDEX)
+        if not xml:
+            print("[ImovelWeb] Falha ao baixar sitemap index", flush=True)
             return []
 
-        links = re.findall(r'href="(/propriedades/[^"?]+)', r.text)
+        sub_urls = re.findall(r'<loc>\s*(.*?)\s*</loc>', xml)
+        # Filtra só os sitemap_list (listagens de imóveis)
+        list_sitemaps = [u for u in sub_urls if "sitemap_list_https" in u]
+        print(f"[ImovelWeb] {len(list_sitemaps)} sub-sitemaps de listagem", flush=True)
+
+        all_urls = []
+        for i, sub_url in enumerate(list_sitemaps):
+            content = self._fetch(sub_url)
+            if not content:
+                continue
+            locs = re.findall(r'<loc>\s*(.*?)\s*</loc>', content)
+
+            if filter_venda:
+                # Filtra só URLs de venda
+                locs = [l for l in locs if "-venda" in l]
+
+            all_urls.extend(locs)
+            print(f"  [{i+1}/{len(list_sitemaps)}] {sub_url.split('/')[-1]}: {len(locs)} URLs", flush=True)
+
+        print(f"[ImovelWeb] Total: {len(all_urls)} URLs de listagem (venda)", flush=True)
+        return all_urls
+
+    # ─── Fase 2: Listagem → links de propriedades ────────────────
+
+    def get_property_links(self, listing_url: str) -> list[str]:
+        """Acessa uma página de listagem e extrai links de /propriedades/."""
+        self._wait()
+        html = self._fetch(listing_url)
+        if not html:
+            return []
+
+        links = re.findall(r'href="(/propriedades/[^"?]+)', html)
         links = list(set(links))
         return [f"https://www.imovelweb.com.br{l}" for l in links]
+
+    # ─── Fase 3: Scraping individual ─────────────────────────────
 
     def scrape_listing(self, url: str) -> dict | None:
         """Scrape de um anúncio individual."""
         self._wait()
-        try:
-            r = self.scraper.get(url, headers=self._headers(), timeout=20)
-            if r.status_code != 200:
-                return None
-        except Exception:
+        html = self._fetch(url)
+        if not html:
             return None
-
-        return self._parse_html(r.text, url)
+        return self._parse_html(html, url)
 
     def _parse_html(self, html: str, url: str) -> dict | None:
-        """Extrai todos os dados possíveis do HTML."""
+        """Extrai dados do HTML de um anúncio."""
         soup = BeautifulSoup(html, "html.parser")
 
         try:
-            # Título
             titulo_el = soup.find("h1")
             titulo = titulo_el.text.strip() if titulo_el else None
 
-            # Preço
             preco_el = soup.find(class_=re.compile(r"price|precio"))
             preco = self._clean_price(preco_el.text) if preco_el else None
 
-            # Descrição
             desc_el = soup.find(class_=re.compile(r"description|descricao"))
             descricao = desc_el.get_text(strip=True) if desc_el else None
 
-            # Características
             features = self._extract_features(soup)
 
-            # Localização
             location_el = soup.find(class_=re.compile(r"location|address"))
             location_text = location_el.get_text(strip=True) if location_el else ""
 
-            # Condomínio / IPTU
             condo = self._find_expense(soup, r"condomínio|condominio")
             iptu = self._find_expense(soup, r"iptu")
 
-            # Coordenadas
             lat, lng = self._extract_coords(html)
-
-            # Fotos
             fotos = self._extract_photos(soup)
-
-            # Amenities
             amenities = self._extract_amenities(soup)
-
-            # Datas
             dates = self._extract_dates(soup, html)
 
-            # Tipo
             tipo = self._detect_tipo(titulo or "", url)
-
-            # Preço por m²
             area = features.get("area_construida")
             preco_por_m2 = round(preco / area, 2) if preco and area and area > 0 else None
 
@@ -136,7 +167,7 @@ class ImovelWebScraper:
                 "amenities": amenities,
                 "data_publicacao": dates.get("pub"),
                 "data_ultima_atualizacao": dates.get("upd"),
-                "raw_html": html[:5000],  # Primeiros 5k do HTML como backup
+                "raw_html": html[:5000],
             }
         except Exception:
             return None
@@ -146,7 +177,7 @@ class ImovelWebScraper:
         items = soup.find_all(class_=re.compile(r"feature|icon-feature|detail"))
         for item in items:
             text = item.get_text(strip=True).lower()
-            if "quarto" in text or "dormitório" in text or "dorm" in text:
+            if "quarto" in text or "dormitório" in text:
                 features["quartos"] = self._extract_int(text)
             elif "suíte" in text or "suite" in text:
                 features["suites"] = self._extract_int(text)
@@ -162,8 +193,7 @@ class ImovelWebScraper:
 
     def _extract_amenities(self, soup) -> str | None:
         amenities = []
-        items = soup.find_all(class_=re.compile(r"amenity|facility|tag"))
-        for item in items:
+        for item in soup.find_all(class_=re.compile(r"amenity|facility|tag")):
             text = item.get_text(strip=True)
             if text and len(text) < 50:
                 amenities.append(text)
@@ -181,20 +211,19 @@ class ImovelWebScraper:
 
     def _extract_dates(self, soup, html: str) -> dict:
         dates = {"pub": None, "upd": None}
-        pub_meta = soup.find("meta", {"property": "article:published_time"})
-        if pub_meta and pub_meta.get("content"):
-            dates["pub"] = pub_meta["content"]
-        mod_meta = soup.find("meta", {"property": "article:modified_time"})
-        if mod_meta and mod_meta.get("content"):
-            dates["upd"] = mod_meta["content"]
+        pub = soup.find("meta", {"property": "article:published_time"})
+        if pub and pub.get("content"):
+            dates["pub"] = pub["content"]
+        mod = soup.find("meta", {"property": "article:modified_time"})
+        if mod and mod.get("content"):
+            dates["upd"] = mod["content"]
         return dates
 
     def _extract_coords(self, html: str) -> tuple:
         lat_m = re.search(r'latitude["\s:=]+(-?\d+\.?\d*)', html)
         lng_m = re.search(r'longitude["\s:=]+(-?\d+\.?\d*)', html)
-        lat = float(lat_m.group(1)) if lat_m else None
-        lng = float(lng_m.group(1)) if lng_m else None
-        return lat, lng
+        return (float(lat_m.group(1)) if lat_m else None,
+                float(lng_m.group(1)) if lng_m else None)
 
     def _find_expense(self, soup, pattern: str) -> float | None:
         el = soup.find(text=re.compile(pattern, re.I))
@@ -205,8 +234,8 @@ class ImovelWebScraper:
     def _clean_price(self, text: str) -> float | None:
         if not text: return None
         cleaned = re.sub(r'[R$\s.]', '', text).replace(',', '.')
-        match = re.search(r'(\d+\.?\d*)', cleaned)
-        try: return float(match.group(1)) if match else None
+        m = re.search(r'(\d+\.?\d*)', cleaned)
+        try: return float(m.group(1)) if m else None
         except: return None
 
     def _extract_int(self, text: str) -> int | None:

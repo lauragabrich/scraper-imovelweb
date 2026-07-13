@@ -5,12 +5,8 @@ on:
     - cron: '15 */6 * * *'
   workflow_dispatch:
     inputs:
-      estado:
-        description: 'Estado (ex: SP, RJ ou ALL)'
-        required: false
-        default: 'ALL'
       limit:
-        description: 'Limite por estado (vazio = sem limite)'
+        description: 'Limite (vazio = sem limite)'
         required: false
         default: ''
 
@@ -34,18 +30,10 @@ jobs:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
-          ESTADO="${{ github.event.inputs.estado || 'ALL' }}"
           LIMIT="${{ github.event.inputs.limit }}"
-
-          if [ "$ESTADO" = "ALL" ]; then
-            CMD="python main.py --all-estados"
-          else
-            CMD="python main.py --estado $ESTADO"
-          fi
-
+          CMD="python main.py"
           if [ -n "$LIMIT" ]; then
             CMD="$CMD --limit $LIMIT"
           fi
-
           echo "Executando: $CMD"
           $CMD
