@@ -71,6 +71,7 @@ def main():
             print(f"  Listagens: {i+1}/{len(remaining)} | Propriedades: {total_saved}", flush=True)
 
     db.save_progress("imovelweb", -1)
+    scraper.close()
     print(f"\n[ImovelWeb] Concluído: {total_saved} anúncios salvos", flush=True)
 
 

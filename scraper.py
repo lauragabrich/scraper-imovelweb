@@ -27,6 +27,19 @@ class ImovelWebScraper:
     def __init__(self):
         self.db = Database()
         self.scraper = cloudscraper.create_scraper()
+        self.driver = None
+
+    def _get_driver(self):
+        if not self.driver:
+            from browser import create_driver
+            print("[ImovelWeb] Iniciando Chrome...", flush=True)
+            self.driver = create_driver(headless=True)
+        return self.driver
+
+    def close(self):
+        if self.driver:
+            self.driver.quit()
+            self.driver = None
 
     def _wait(self, min_s=2.0, max_s=4.0):
         time.sleep(random.uniform(min_s, max_s))
@@ -39,14 +52,14 @@ class ImovelWebScraper:
         }
 
     def _fetch(self, url: str, retries: int = 2) -> str | None:
-        """GET com retry."""
+        """GET com cloudscraper, fallback Selenium."""
+        # Tenta cloudscraper primeiro (mais rápido para sitemaps XML)
         for attempt in range(1, retries + 1):
             try:
                 self._wait(0.5, 1.5)
                 r = self.scraper.get(url, headers=self._headers(), timeout=30)
                 if r.status_code == 403:
-                    time.sleep(5)
-                    continue
+                    break  # Vai pro Selenium
                 r.raise_for_status()
                 if url.endswith(".gz"):
                     return gzip.decompress(r.content).decode("utf-8")
@@ -54,7 +67,15 @@ class ImovelWebScraper:
             except Exception:
                 if attempt < retries:
                     time.sleep(2 ** attempt)
-        return None
+
+        # Fallback: Selenium
+        from browser import fetch_page
+        driver = self._get_driver()
+        try:
+            html = fetch_page(driver, url)
+            return html if html else None
+        except Exception:
+            return None
 
     # ─── Fase 1: Sitemap → URLs de listagem ──────────────────────
 
