@@ -33,7 +33,7 @@ class ImovelWebScraper:
         if not self.driver:
             from browser import create_driver
             print("[ImovelWeb] Iniciando Chrome...", flush=True)
-            self.driver = create_driver(headless=True)
+            self.driver = create_driver(headless=False)  # Visível para bypass Cloudflare
         return self.driver
 
     def close(self):
