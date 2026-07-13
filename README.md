@@ -1,36 +1,44 @@
 # Scraper ImovelWeb - Imóveis Brasil
 
-Coleta anúncios do ImovelWeb usando sitemap do site (200k+ URLs de listagem) para cobertura completa.
+Coleta anúncios do ImovelWeb usando **386.361 URLs de listagem** extraídas do sitemap oficial + Selenium para bypass do Cloudflare.
 
 ## Abordagem técnica
 
-### Fase 1: Sitemap → URLs de listagem (cloudscraper)
+### Fase 1: URLs de listagem (pré-baixadas do sitemap)
+
+O sitemap do ImovelWeb (`sitemaps_https.xml`) contém 42 sub-sitemaps com 386k+ URLs de páginas de listagem:
 ```
-sitemaps_https.xml → 42 sub-sitemaps (gzip)
-→ 200k+ URLs tipo /apartamentos-venda-sao-paulo-sp.html
-→ Filtra apenas URLs de venda
+/apartamentos-venda-sao-paulo-sp.html
+/casas-venda-campinas-sp.html
+/terrenos-venda-belo-horizonte-mg.html
+...
 ```
 
-### Fase 2: Listagem → links de propriedades (cloudscraper)
-```
-Cada URL de listagem tem ~30 links de /propriedades/...
-→ Extrai todos os links
-```
+Essas URLs foram baixadas localmente e commitadas no repositório (`listing_urls.json`) porque o Cloudflare bloqueia o download dos sitemaps no GitHub Actions.
 
-### Fase 3: Scraping individual (cloudscraper + BeautifulSoup)
-```
-Acessa cada /propriedades/... e extrai:
-preço, área, quartos, bairro, fotos, coordenadas, etc.
-```
+### Fase 2: Listagem → links de propriedades (Selenium)
+
+Para cada URL de listagem, acessa com **undetected-chromedriver** e extrai links de anúncios individuais (`/propriedades/...`).
+
+### Fase 3: Scraping individual (Selenium + BeautifulSoup)
+
+Visita cada propriedade com Selenium e extrai dados via BeautifulSoup:
+- Preço, área, quartos, banheiros, vagas
+- Localização (endereço, coordenadas)
+- Descrição, fotos, amenities
+- Condomínio, IPTU
 
 ## Dados coletados
 
-- Preço, condomínio, IPTU, preço/m²
-- Área construída/terreno, quartos, suítes, banheiros, vagas
-- Localização (endereço, coordenadas)
-- Título, descrição, fotos, amenities
-- Datas (quando disponíveis via meta tags)
-- HTML parcial como backup
+| Categoria | Campos |
+|-----------|--------|
+| Preço | preço, condomínio, IPTU, preço/m² |
+| Características | área construída, área terreno, quartos, suítes, banheiros, vagas, tipo |
+| Localização | rua, latitude, longitude |
+| Qualitativo | título, descrição, fotos, amenities |
+| Temporalidade | data publicação, data atualização (quando disponível), data coleta |
+| Backup | raw_html (primeiros 5KB) |
+| Controle | imovel_disponivel, imovel_atualizado |
 
 ## Uso
 
@@ -43,14 +51,15 @@ python main.py --reset
 
 ## Cobertura
 
-- ✅ 200k+ URLs de listagem do sitemap oficial
-- ✅ Todas as cidades/bairros que o ImovelWeb indexa
-- ✅ Apenas venda (filtrado)
+- ✅ 386.361 URLs de listagem (todas as combinações tipo+cidade do Brasil)
+- ✅ Apenas venda (filtrado do sitemap)
 - ✅ Progresso salvo no banco (continua entre execuções)
+- ✅ Selenium bypassa Cloudflare
 
 ## Limitações
 
-- Cloudflare pode bloquear (usa cloudscraper para bypass)
-- Scraping HTML é lento (~3-5s por anúncio)
-- Estrutura HTML pode mudar
-- Datas nem sempre disponíveis
+- Selenium é lento (~3-5s por página)
+- Chrome headless consome memória
+- Cloudflare pode eventualmente bloquear
+- Estrutura HTML pode mudar sem aviso
+- Datas nem sempre disponíveis nas meta tags
